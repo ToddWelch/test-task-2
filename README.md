@@ -4,7 +4,9 @@
 
 A production-grade data pipeline that ingests a messy 500-row customer CSV, validates it against 35 rules across three severity levels (ERROR, WARNING, CLEANED), and outputs a clean SQLite database alongside a detailed validation report. Built as Task 2 of the Schneider Saddlery Head of Technology technical assessment, this pipeline demonstrates the kind of data quality engineering required when syncing customer records between Shopify, Fulfil.io, and third-party data sources.
 
-The pipeline processed 500 input records, loaded 367 clean records into SQLite, rejected 133 records with errors, flagged 79 records with warnings, and auto-cleaned 175 field values.
+The pipeline processed 500 input records, loaded 367 clean records into SQLite, rejected 133 records with errors, flagged 79 records with warnings, and auto-cleaned 841 field values.
+
+---
 
 ## Quick Start
 
@@ -46,6 +48,8 @@ Open `report/index.html` in any browser (just double-click the file). You can al
 python -m unittest discover tests/ -v
 ```
 
+---
+
 ## Architecture
 
 The pipeline follows a modular, single-responsibility design. Each stage is a separate Python module that can be tested and modified independently.
@@ -81,6 +85,28 @@ CSV File
 | **Models** | `src/models.py` | Pydantic data models for CustomerRecord, ValidationIssue, and PipelineRun. Enforces type safety throughout the pipeline. |
 | **Constants** | `src/constants.py` | Enums, valid state codes, state name-to-abbreviation mappings, loyalty tier values, and other reference data. |
 | **Pipeline CLI** | `pipeline.py` | Argparse-based entry point. Orchestrates the full flow and prints summary statistics. |
+
+---
+
+### Three Severity Tiers: Why Separate Errors from Warnings from Cleaning
+
+A simpler pipeline would have two buckets: pass or fail. Three tiers exist because that is how production data operations actually work:
+
+- **ERROR** means the record is fundamentally broken. Missing email, negative spend sentinel, temporal impossibility. These cannot be loaded without risking downstream corruption. A customer with no email cannot receive order confirmations, abandoned cart flows, or shipping notifications. Loading it silently creates a time bomb.
+
+- **WARNING** means the record is loadable but suspicious. A Bronze tier customer with $4,900 in lifetime spend probably got mis-tiered during a migration. The record works, but someone should investigate. Loading it with a flag lets operations continue while surfacing the anomaly.
+
+- **CLEANED** means the pipeline fixed something automatically and logged what it changed. Phone formatting, state abbreviation normalization, date format conversion. These are safe to auto-correct because the intent is unambiguous: "ca." is California, "1" for newsletter means True. But the original value is always preserved in the audit trail so corrections can be reviewed or reverted.
+
+This mirrors how platforms like Fulfil.io handle data imports: records are accepted, accepted with warnings, or rejected, with a downloadable report of everything that happened.
+
+### Why a Standalone HTML Report
+
+The brief asked for a validation report. A JSON file satisfies the requirement. But the people who actually use data quality reports are operations managers and merchandisers, not engineers. They need to filter by severity, search for specific customers, print a summary for a meeting, or export issues to a spreadsheet for assignment.
+
+The standalone HTML report (no server, no install, double-click to open) serves this audience. It also demonstrates that the validation logic is portable: the same 35 rules run in both Python (for pipeline automation) and JavaScript (for ad-hoc analysis by non-technical users). If a new CSV arrives and someone wants a quick quality check before running the full pipeline, they drop it on the HTML page and get results in seconds.
+
+---
 
 ## Validation Rules
 
@@ -144,7 +170,41 @@ All 35 rules organized by severity level:
 | Clean records loaded to SQLite | 367 |
 | Rejected records (ERROR) | 133 |
 | Records with warnings | 79 |
-| Auto-cleaned field values | 175 |
+| Auto-cleaned field values | 841 |
+
+---
+
+## HTML Validation Report
+
+The standalone HTML report (`report/index.html`) duplicates all 35 validation rules in JavaScript, enabling client-side processing of any CSV with matching column names. No data leaves the user's machine.
+
+### Upload and Processing
+
+Drag and drop a CSV onto the upload zone (or use the file picker). PapaParse handles CSV parsing client-side. All 35 rules execute in JavaScript with the same logic, thresholds, and edge case handling as the Python pipeline. The report works by double-clicking the file from a file explorer. No server, no build step, no installation.
+
+### Dashboard and Filtering
+
+The summary strip shows five KPI cards: Total Records, Clean, Rejected, Warnings, and Cleaning Actions. Below it, severity filter checkboxes (ERROR in red, WARNING in amber, CLEANED in green) control which issues appear in the table. ERROR and WARNING are checked by default; CLEANED is unchecked to reduce noise on first load.
+
+Additional filters include a Rule ID dropdown, a Field dropdown, and free-text search across rule, field, and message columns. Pagination updates to reflect the active filter state.
+
+### CLEANED Entry Collapsing
+
+CLEANED actions for the same record collapse into a single green summary row showing all rules applied and fields affected (e.g., "R29, R31, R33 | 10 fields | Trimmed whitespace, Normalized phone..."). Clicking the row expands a sub-table with individual cleaning actions. Collapsing is display-only; the CSV export outputs individual uncollapsed rows for machine consumption.
+
+### Print Output
+
+The print button expands all filtered rows (not just the visible page), hides UI controls, and renders a clean document. The table header repeats on every page. The ROW column uses nowrap to prevent number splitting. The RULE and FIELD columns use 7pt nowrap to keep identifiers like R25_TIER_SPEND_MISMATCH intact. A compact KPI strip ensures the data table starts on page 1. Severity badges use ink-friendly styling (white background with colored borders). A tip at the top suggests disabling browser headers and footers for cleaner output.
+
+### Export
+
+The Export CSV button outputs all filtered issues as individual (uncollapsed) rows with columns: row, severity, rule, field, message, original, corrected.
+
+### Dependencies
+
+Tailwind CSS (CDN) for styling and PapaParse (CDN) for CSV parsing. No framework, no build step, no backend, no npm.
+
+---
 
 ## Production Adaptation
 
@@ -219,6 +279,8 @@ This pipeline's architecture draws from production experience with multi-source 
 - **TutorBird 62-column CSV import:** Complex multi-format ingestion with validation across date formats, currency formats, and optional fields that could appear in any order
 - **RestockPro, AnalyzerTools, ListingMirror reconciliation:** Multi-source data pipelines where the same product appears in 3-4 systems with different field names, formats, and update cadences, requiring fuzzy matching and conflict resolution
 
+---
+
 ## Pre-Production Checks
 
 Before executing this pipeline against a production system, run these checks:
@@ -238,6 +300,8 @@ Before executing this pipeline against a production system, run these checks:
    - Import within a transaction where possible
    - Verify record counts and data integrity before committing
    - If verification fails, roll back to the tagged state
+
+---
 
 ## Output Verification
 
@@ -331,19 +395,74 @@ SELECT COUNT(DISTINCT customer_id) as unique_ids FROM customers;
 -- Should equal 367 (clean record count)
 ```
 
+---
+
 ## AI Tools Used
 
-Built with Claude Code using Morpheus (builder) and Crash Override (reviewer) agent workflow. Independent code review by OpenAI Codex. Spec document created collaboratively in Claude.ai.
+### Claude (claude.ai, Specification and Strategy)
 
-## Time Tracking
+Used as a strategic planning partner before any code was written. The project specification (TASK2_SPEC.md) was developed collaboratively in Claude.ai, including: analyzing the CSV to inventory all data quality issues across 500 rows and 17 columns, designing the 35 validation rules with severity tiers and edge case handling, defining the SQLite schema with audit trail tables, planning the modular project structure, and writing detailed acceptance criteria for the HTML report.
+
+Claude.ai also produced iterative spec patches (TASK2_SPEC_PATCH_001 through PATCH_003) to refine the HTML report based on testing. These addressed: collapsing CLEANED entries per record to reduce noise, adding severity filter checkboxes with CLEANED unchecked by default, fixing the print stylesheet to render all filtered rows across correct page breaks, and preventing column wrapping on rule IDs and row numbers.
+
+### Claude Code (Morpheus/Crash Override Agent Workflow)
+
+All code was built using Claude Code with a two-agent workflow orchestrated via CLAUDE.md conventions:
+
+- **Morpheus** (builder agent): Received implementation tasks with full context from the spec. Produced plans before building, then implemented on feature branches. Built all Python pipeline modules, the test suite, and the 1,900-line standalone HTML report with client-side validation logic.
+
+- **Crash Override** (reviewer agent): Reviewed all code before merge to main. Evaluated correctness, edge cases, security, style consistency, and adherence to project conventions (including the no em dash rule). Read-only; never modified code directly.
+
+The orchestrator (Claude Code) relayed tasks between agents following a strict flow: task, plan, review plan, build, review build, merge. This is the same workflow used across production projects including the Welch Command Center and TTC Greer CRM.
+
+### OpenAI Codex (Independent Code Review)
+
+After the build was complete, the entire repository was submitted to OpenAI Codex for an independent third-party code review. Codex received a detailed review prompt covering all 35 validation rules, edge case specifications, idempotency requirements, security concerns (SQL injection, XSS in the HTML report), and the em dash style constraint. Codex evaluated correctness, security, code quality, testing coverage, and production readiness. Findings were triaged and fixed before submission.
+
+### What AI Did Not Do
+
+AI did not make architectural decisions without human review. Every plan was approved before implementation. Strategy decisions (SQLite over JSON, standalone HTML report with client-side validation, three severity tiers, COPPA age checking) were made by Todd based on production experience with e-commerce data pipelines. All iterative refinement of the HTML report (print stylesheet fixes, severity checkboxes, collapsed CLEANED entries) was driven by Todd testing the actual printed output and directing specific changes through spec patches.
+
+---
+
+## Limitations
+
+- Processes local CSV files only; not connected to a live Shopify or Fulfil.io instance
+- Duplicate email detection is within-batch only; does not check against existing customers in a target system
+- State normalization covers the 5 variants found in the test data ("ca.", "N.Y.", "ohio", "il", "Florida"); a production system would use a comprehensive state name/abbreviation lookup
+- Zip code validation checks format (5 digits) only; does not verify the zip exists or matches the stated city/state (no USPS API call)
+- Fuzzy duplicate detection (R28) uses exact last_name + zip match; a production system would use edit distance or phonetic matching
+- The HTML report loads Tailwind CSS and PapaParse from CDN, requiring internet access for styling and CSV parsing
+- Phone normalization assumes US phone numbers (10-digit with area code)
+- No multi-threaded or async processing; performance on datasets over 50,000 rows has not been tested
+
+---
+
+## Roadmap
+
+1. **Live API integration:** Connect to Shopify Customer API and Fulfil.io REST API with rate limit handling, batch operations, and checkpoint/resume for large imports
+2. **Cross-system duplicate detection:** Before creating a customer, query the target system by email to determine create vs. update
+3. **Configurable rule engine:** Move rule definitions to a YAML or JSON config file so thresholds (AOV outlier, tier/spend mismatch boundaries, COPPA age) can be adjusted without code changes
+4. **Historical quality tracking:** Store validation results over time to measure whether data quality improves across import batches
+5. **Webhook-triggered validation:** Register for Shopify customers/create webhooks to validate new records in real time
+6. **Enhanced fuzzy matching:** Replace exact last_name + zip matching with Jaro-Winkler or Soundex for better duplicate detection
+7. **Multi-format support:** Accept JSON, XML, and direct API responses in addition to CSV
+8. **International address support:** Extend state/zip validation beyond US formats for Canadian and international customers
+
+---
+
+## Time Spent
 
 | Phase | Time |
-|-------|------|
-| Planning and spec | ~30 min |
-| Phase 1: Foundation (models, constants, project setup) | ~15 min |
-| Phase 2: Pipeline Core (loader, validators, transformer, writer, CLI) | ~45 min |
-| Phase 3: Testing (unit, integration, idempotency tests) | ~30 min |
-| Phase 4: HTML Report (standalone validation viewer) | ~30 min |
-| Phase 5: Documentation (this README) | ~20 min |
-| Review and polish | ~10 min |
-| **Total** | **~3 hours** |
+|---|---|
+| Specification, data analysis, and strategy (Claude.ai) | 0.75 hours |
+| Foundation: models, constants, project setup | 0.25 hours |
+| Pipeline core: loader, validators, transformer, writer, CLI | 0.75 hours |
+| Testing: unit, integration, idempotency | 0.25 hours |
+| HTML report: initial build and iterative refinement | 0.75 hours |
+| Documentation and README | 0.25 hours |
+| Codex independent review and fixes | 0.25 hours |
+| **Total** | **3.25 hours** |
+
+Task 1 (AI-Powered OOS Intelligence Tool): 5.0 hours
+**Combined assessment total: 8.25 hours**
