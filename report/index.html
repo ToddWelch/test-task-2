@@ -169,7 +169,7 @@
 <section id="results-section" class="hidden max-w-7xl mx-auto px-4 pb-12 sm:px-6 lg:px-8">
 
   <!-- Dashboard Cards (KPI Strip) -->
-  <div class="mb-8 px-8 py-8" style="background-color: #002848; margin-left: -9999px; margin-right: -9999px; padding-left: 9999px; padding-right: 9999px;">
+  <div class="px-8 py-8" style="background-color: #002848; margin-left: -9999px; margin-right: -9999px; padding-left: 9999px; padding-right: 9999px;">
     <div id="dashboard" class="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-5 gap-4">
       <div class="rounded-lg p-5 text-center" style="background-color: rgba(255,255,255,0.08);">
         <p class="text-xs font-semibold uppercase tracking-wider mb-2" style="color: rgba(255,255,255,0.7);">Total Records</p>
@@ -192,6 +192,10 @@
         <p class="text-4xl font-bold text-white" id="stat-cleaned">0</p>
       </div>
     </div>
+  </div>
+  <!-- Filter context line below KPI strip -->
+  <div class="mb-8 px-8 py-2" style="background-color: #003460; margin-left: -9999px; margin-right: -9999px; padding-left: 9999px; padding-right: 9999px;">
+    <p class="text-xs text-center max-w-7xl mx-auto" style="color: rgba(255,255,255,0.6);" id="dashboard-context">Showing 0 of 0 total issues | ERROR: checked, WARNING: checked, CLEANED: unchecked</p>
   </div>
 
   <!-- Severity Legend -->
@@ -223,12 +227,17 @@
       </div>
       <div>
         <label class="text-xs font-medium uppercase tracking-wider block mb-1" style="color: #555555;">Severity</label>
-        <select id="filter-severity" onchange="applyFilters()" class="block text-sm rounded px-2 py-2 border bg-white" style="border-color: #D1D5DB;">
-          <option value="">All</option>
-          <option value="ERROR">Error</option>
-          <option value="WARNING">Warning</option>
-          <option value="CLEANED">Cleaned</option>
-        </select>
+        <div class="flex items-center gap-4 text-sm py-1">
+          <label style="color: #CC0000; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="filter-sev-error" checked onchange="applyFilters()"> ERROR (<span id="count-error">0</span>)
+          </label>
+          <label style="color: #D97706; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="filter-sev-warning" checked onchange="applyFilters()"> WARNING (<span id="count-warning">0</span>)
+          </label>
+          <label style="color: #059669; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="filter-sev-cleaned" onchange="applyFilters()"> CLEANED (<span id="count-cleaned-display">0</span>)
+          </label>
+        </div>
       </div>
       <div>
         <label class="text-xs font-medium uppercase tracking-wider block mb-1" style="color: #555555;">Rule ID</label>
@@ -1142,7 +1151,9 @@ function validateRecords(rows) {
 // UI STATE
 // =========================================================================
 
-let allIssues = [];
+let allIssuesRaw = [];      // Individual issues (for export, counts)
+let allIssuesDisplay = [];  // Collapsed CLEANED rows (for table display)
+let allIssues = [];         // Alias: points to allIssuesDisplay for filtering
 let filteredIssues = [];
 let currentPage = 0;
 const pageSize = 50;
@@ -1153,6 +1164,89 @@ let sortDirection = "asc";
 // =========================================================================
 // UI FUNCTIONS
 // =========================================================================
+
+function collapseCleanedIssues(issues) {
+  // Creates a display array where CLEANED issues for the same row are collapsed
+  // into a single summary row. ERROR and WARNING remain individual.
+  var display = [];
+  // Group CLEANED issues by row_number
+  var cleanedByRow = {};
+  issues.forEach(function(issue) {
+    if (issue.severity === "CLEANED") {
+      var key = issue.row_number;
+      if (!cleanedByRow[key]) {
+        cleanedByRow[key] = [];
+      }
+      cleanedByRow[key].push(issue);
+    } else {
+      display.push(issue);
+    }
+  });
+
+  // Build collapsed rows for each group of CLEANED issues
+  Object.keys(cleanedByRow).forEach(function(rowKey) {
+    var group = cleanedByRow[rowKey];
+    if (group.length === 0) return;
+
+    // Collect unique rule IDs
+    var ruleIds = [];
+    var ruleIdSet = {};
+    group.forEach(function(g) {
+      if (!ruleIdSet[g.rule_id]) {
+        ruleIdSet[g.rule_id] = true;
+        ruleIds.push(g.rule_id);
+      }
+    });
+
+    // Collect field names
+    var fieldNames = [];
+    group.forEach(function(g) {
+      g.field.split(",").forEach(function(f) {
+        var trimmed = f.trim();
+        if (fieldNames.indexOf(trimmed) === -1) {
+          fieldNames.push(trimmed);
+        }
+      });
+    });
+
+    // Build a summary message from the cleaning actions
+    var actionSummaries = [];
+    var actionSet = {};
+    group.forEach(function(g) {
+      var action = "";
+      if (g.rule_id === "R29_WHITESPACE_TRIM") action = "Trimmed whitespace";
+      else if (g.rule_id === "R30_STATE_NORMALIZE") action = "Normalized state";
+      else if (g.rule_id === "R31_PHONE_NORMALIZE") action = "Normalized phone";
+      else if (g.rule_id === "R32_TIER_NORMALIZE") action = "Normalized tier";
+      else if (g.rule_id === "R33_NEWSLETTER_NORMALIZE") action = "Normalized newsletter";
+      else if (g.rule_id === "R34_DATE_NORMALIZE") action = "Normalized date";
+      else if (g.rule_id === "R35_NULL_SENTINEL") action = "Converted NULL sentinel";
+      else action = g.rule_id;
+      if (!actionSet[action]) {
+        actionSet[action] = true;
+        actionSummaries.push(action);
+      }
+    });
+
+    var fieldList = fieldNames.join(", ");
+    var summaryMsg = actionSummaries.join(", ") + " (" + fieldList + ")";
+
+    display.push({
+      row_number: group[0].row_number,
+      customer_id: group[0].customer_id,
+      severity: "CLEANED",
+      rule_id: ruleIds.join(", "),
+      field: fieldNames.length + " fields",
+      message: summaryMsg,
+      original_value: "",
+      corrected_value: "",
+      _originalRow: group[0]._originalRow,
+      _collapsedIssues: group
+    });
+  });
+
+  return display;
+}
 
 function processFile(file) {
   document.getElementById("drop-zone").classList.add("hidden");
@@ -1171,14 +1265,27 @@ function processFile(file) {
       }
 
       const outcome = validateRecords(results.data);
-      allIssues = outcome.issues;
+      allIssuesRaw = outcome.issues;
+      allIssuesDisplay = collapseCleanedIssues(allIssuesRaw);
+      allIssues = allIssuesDisplay;
 
-      // Update dashboard
+      // Update dashboard KPI cards (always show full pipeline stats)
       document.getElementById("stat-total").textContent = outcome.total;
       document.getElementById("stat-clean").textContent = outcome.clean;
       document.getElementById("stat-rejected").textContent = outcome.rejected;
       document.getElementById("stat-warnings").textContent = outcome.warnings;
       document.getElementById("stat-cleaned").textContent = outcome.cleaningActions;
+
+      // Update severity checkbox counts from raw (uncollapsed) issues
+      var errorCount = 0, warningCount = 0, cleanedCount = 0;
+      allIssuesRaw.forEach(function(issue) {
+        if (issue.severity === "ERROR") errorCount++;
+        else if (issue.severity === "WARNING") warningCount++;
+        else if (issue.severity === "CLEANED") cleanedCount++;
+      });
+      document.getElementById("count-error").textContent = errorCount;
+      document.getElementById("count-warning").textContent = warningCount;
+      document.getElementById("count-cleaned-display").textContent = cleanedCount;
 
       // Populate filter dropdowns
       populateFilters();
@@ -1207,7 +1314,7 @@ function processFile(file) {
 function populateFilters() {
   const ruleSet = new Set();
   const fieldSet = new Set();
-  allIssues.forEach(function(issue) {
+  allIssuesRaw.forEach(function(issue) {
     ruleSet.add(issue.rule_id);
     issue.field.split(",").forEach(function(f) { fieldSet.add(f.trim()); });
   });
@@ -1231,18 +1338,49 @@ function populateFilters() {
   });
 }
 
+function getActiveSeverities() {
+  var active = [];
+  if (document.getElementById("filter-sev-error").checked) active.push("ERROR");
+  if (document.getElementById("filter-sev-warning").checked) active.push("WARNING");
+  if (document.getElementById("filter-sev-cleaned").checked) active.push("CLEANED");
+  return active;
+}
+
 function applyFilters() {
-  const severity = document.getElementById("filter-severity").value;
+  const activeSeverities = getActiveSeverities();
   const rule = document.getElementById("filter-rule").value;
   const field = document.getElementById("filter-field").value;
   const search = document.getElementById("filter-search").value.toLowerCase();
 
-  filteredIssues = allIssues.filter(function(issue) {
-    if (severity && issue.severity !== severity) return false;
-    if (rule && issue.rule_id !== rule) return false;
-    if (field && issue.field.indexOf(field) === -1) return false;
+  filteredIssues = allIssuesDisplay.filter(function(issue) {
+    // Severity checkbox filter
+    if (activeSeverities.indexOf(issue.severity) === -1) return false;
+    // Rule filter: for collapsed rows, check if any collapsed issue matches
+    if (rule) {
+      if (issue._collapsedIssues) {
+        var ruleMatch = false;
+        for (var i = 0; i < issue._collapsedIssues.length; i++) {
+          if (issue._collapsedIssues[i].rule_id === rule) { ruleMatch = true; break; }
+        }
+        if (!ruleMatch) return false;
+      } else {
+        if (issue.rule_id !== rule) return false;
+      }
+    }
+    // Field filter: for collapsed rows, check if any collapsed issue matches
+    if (field) {
+      if (issue._collapsedIssues) {
+        var fieldMatch = false;
+        for (var i = 0; i < issue._collapsedIssues.length; i++) {
+          if (issue._collapsedIssues[i].field.indexOf(field) !== -1) { fieldMatch = true; break; }
+        }
+        if (!fieldMatch) return false;
+      } else {
+        if (issue.field.indexOf(field) === -1) return false;
+      }
+    }
     if (search) {
-      const haystack = [
+      var haystack = [
         issue.message, issue.original_value, issue.corrected_value,
         issue.customer_id, issue.field, issue.rule_id,
         String(issue.row_number)
@@ -1256,10 +1394,13 @@ function applyFilters() {
   currentPage = 0;
   renderTable();
   updateFilterCount();
+  updateDashboardContext();
 }
 
 function clearFilters() {
-  document.getElementById("filter-severity").value = "";
+  document.getElementById("filter-sev-error").checked = true;
+  document.getElementById("filter-sev-warning").checked = true;
+  document.getElementById("filter-sev-cleaned").checked = false;
   document.getElementById("filter-rule").value = "";
   document.getElementById("filter-field").value = "";
   document.getElementById("filter-search").value = "";
@@ -1329,7 +1470,7 @@ function renderTable() {
     tr.innerHTML =
       '<td class="px-3 py-2 font-mono text-xs" style="color: #1a1a1a;"><span class="chevron" id="chevron-' + (start + idx) + '"></span>' + issue.row_number + '</td>' +
       '<td class="px-3 py-2"><span class="inline-block px-2 py-1 rounded-full text-sm font-medium whitespace-nowrap ' + badgeClass + '">' + issue.severity + '</span></td>' +
-      '<td class="px-3 py-2 text-sm font-mono" style="color: #555555;">' + issue.rule_id + '</td>' +
+      '<td class="px-3 py-2 text-sm font-mono" style="color: #555555;">' + escapeHtml(issue.rule_id) + '</td>' +
       '<td class="px-3 py-2 text-sm" style="color: #1a1a1a;">' + escapeHtml(issue.field) + '</td>' +
       '<td class="px-3 py-2 text-sm" style="color: #1a1a1a;">' + escapeHtml(issue.message) + '</td>' +
       '<td class="px-3 py-2 text-sm max-w-[150px] truncate" style="color: #555555;">' + escapeHtml(String(issue.original_value || "")) + '</td>' +
@@ -1346,25 +1487,55 @@ function renderTable() {
     detailTd.colSpan = 7;
     detailTd.className = "px-4 py-3";
 
-    let detailHtml = '<div class="text-sm"><p class="font-semibold mb-2" style="color: #333333;">Original Record (Row ' + issue.row_number + ')</p>';
-    detailHtml += '<div class="grid grid-cols-2 md:grid-cols-4 gap-2">';
-    if (issue._originalRow) {
-      Object.keys(issue._originalRow).forEach(function(key) {
-        const val = issue._originalRow[key];
-        detailHtml += '<div><span class="font-medium" style="color: #555555;">' + escapeHtml(key) + ':</span> <span style="color: #1a1a1a;">' + escapeHtml(String(val || "(empty)")) + '</span></div>';
+    let detailHtml = '';
+
+    if (issue._collapsedIssues) {
+      // Collapsed CLEANED row: show individual cleaning actions as a sub-table
+      detailHtml += '<div class="text-sm"><p class="font-semibold mb-2" style="color: #333333;">Cleaning Actions for Row ' + issue.row_number + ' (' + issue._collapsedIssues.length + ' actions)</p>';
+      detailHtml += '<table class="w-full text-xs border" style="border-color: #D1D5DB;">';
+      detailHtml += '<thead><tr style="background-color: #E5E7EB;">';
+      detailHtml += '<th class="px-2 py-1 text-left" style="color: #555555;">Field</th>';
+      detailHtml += '<th class="px-2 py-1 text-left" style="color: #555555;">Rule</th>';
+      detailHtml += '<th class="px-2 py-1 text-left" style="color: #555555;">Action</th>';
+      detailHtml += '<th class="px-2 py-1 text-left" style="color: #555555;">Original</th>';
+      detailHtml += '<th class="px-2 py-1 text-left" style="color: #555555;">Corrected</th>';
+      detailHtml += '</tr></thead><tbody>';
+      issue._collapsedIssues.forEach(function(ci, ciIdx) {
+        var rowBg = ciIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB';
+        detailHtml += '<tr style="background-color: ' + rowBg + ';">';
+        detailHtml += '<td class="px-2 py-1" style="color: #1a1a1a;">' + escapeHtml(ci.field) + '</td>';
+        detailHtml += '<td class="px-2 py-1 font-mono" style="color: #555555;">' + escapeHtml(ci.rule_id) + '</td>';
+        detailHtml += '<td class="px-2 py-1" style="color: #1a1a1a;">' + escapeHtml(ci.message) + '</td>';
+        detailHtml += '<td class="px-2 py-1" style="color: #555555;">' + escapeHtml(String(ci.original_value || "")) + '</td>';
+        detailHtml += '<td class="px-2 py-1" style="color: #059669;">' + escapeHtml(String(ci.corrected_value || "")) + '</td>';
+        detailHtml += '</tr>';
       });
+      detailHtml += '</tbody></table></div>';
+    } else {
+      // Standard detail: show original record
+      detailHtml += '<div class="text-sm"><p class="font-semibold mb-2" style="color: #333333;">Original Record (Row ' + issue.row_number + ')</p>';
+      detailHtml += '<div class="grid grid-cols-2 md:grid-cols-4 gap-2">';
+      if (issue._originalRow) {
+        Object.keys(issue._originalRow).forEach(function(key) {
+          const val = issue._originalRow[key];
+          detailHtml += '<div><span class="font-medium" style="color: #555555;">' + escapeHtml(key) + ':</span> <span style="color: #1a1a1a;">' + escapeHtml(String(val || "(empty)")) + '</span></div>';
+        });
+      }
+      detailHtml += '</div></div>';
     }
-    detailHtml += '</div></div>';
+
     detailTd.innerHTML = detailHtml;
     detailTr.appendChild(detailTd);
     tbody.appendChild(detailTr);
   });
 
-  // Update pagination
+  // Update pagination with active severity filters (Change 3)
   const totalPages = Math.ceil(filteredIssues.length / pageSize);
+  const activeSeverities = getActiveSeverities();
+  var filterLabel = activeSeverities.length > 0 ? activeSeverities.join(", ") : "none";
   document.getElementById("page-info").textContent =
     filteredIssues.length === 0 ? "No issues found" :
-    "Showing " + (start + 1) + " to " + end + " of " + filteredIssues.length + " issues (page " + (currentPage + 1) + " of " + totalPages + ")";
+    "Showing " + (start + 1) + " to " + end + " of " + filteredIssues.length + " issues (page " + (currentPage + 1) + " of " + totalPages + ") -- Filtered: " + filterLabel;
 
   document.getElementById("btn-prev").disabled = currentPage === 0;
   document.getElementById("btn-next").disabled = currentPage >= totalPages - 1;
@@ -1448,11 +1619,25 @@ function renderPageNumbers() {
 
 function updateFilterCount() {
   const el = document.getElementById("filter-count");
-  if (filteredIssues.length === allIssues.length) {
-    el.textContent = "Showing all " + allIssues.length + " issues";
+  if (filteredIssues.length === allIssuesDisplay.length) {
+    el.textContent = "Showing all " + allIssuesDisplay.length + " display rows";
   } else {
-    el.textContent = "Showing " + filteredIssues.length + " of " + allIssues.length + " issues (filtered)";
+    el.textContent = "Showing " + filteredIssues.length + " of " + allIssuesDisplay.length + " display rows (filtered)";
   }
+}
+
+function updateDashboardContext() {
+  var el = document.getElementById("dashboard-context");
+  if (!el) return;
+  var errorChecked = document.getElementById("filter-sev-error").checked;
+  var warningChecked = document.getElementById("filter-sev-warning").checked;
+  var cleanedChecked = document.getElementById("filter-sev-cleaned").checked;
+  var totalRaw = allIssuesRaw.length;
+  var showing = filteredIssues.length;
+  el.textContent = "Showing " + showing + " of " + totalRaw + " total issues | ERROR: " +
+    (errorChecked ? "checked" : "unchecked") + ", WARNING: " +
+    (warningChecked ? "checked" : "unchecked") + ", CLEANED: " +
+    (cleanedChecked ? "checked" : "unchecked");
 }
 
 function escapeHtml(text) {
@@ -1467,7 +1652,28 @@ function escapeHtml(text) {
 // =========================================================================
 
 function exportCSV() {
-  if (filteredIssues.length === 0) {
+  // Export from allIssuesRaw (uncollapsed individual issues), filtered by current severity checkboxes
+  var activeSeverities = getActiveSeverities();
+  var rule = document.getElementById("filter-rule").value;
+  var field = document.getElementById("filter-field").value;
+  var search = document.getElementById("filter-search").value.toLowerCase();
+
+  var exportIssues = allIssuesRaw.filter(function(issue) {
+    if (activeSeverities.indexOf(issue.severity) === -1) return false;
+    if (rule && issue.rule_id !== rule) return false;
+    if (field && issue.field.indexOf(field) === -1) return false;
+    if (search) {
+      var haystack = [
+        issue.message, issue.original_value, issue.corrected_value,
+        issue.customer_id, issue.field, issue.rule_id,
+        String(issue.row_number)
+      ].join(" ").toLowerCase();
+      if (haystack.indexOf(search) === -1) return false;
+    }
+    return true;
+  });
+
+  if (exportIssues.length === 0) {
     alert("No issues to export.");
     return;
   }
@@ -1475,7 +1681,7 @@ function exportCSV() {
   const headers = ["row_number", "customer_id", "severity", "rule_id", "field", "message", "original_value", "corrected_value"];
   const rows = [headers.join(",")];
 
-  filteredIssues.forEach(function(issue) {
+  exportIssues.forEach(function(issue) {
     const row = headers.map(function(h) {
       let val = issue[h];
       if (val === null || val === undefined) val = "";
