@@ -644,6 +644,19 @@ function validateRecords(rows) {
   const rowErrorIssues = []; // ERROR issues per row (excluding R03)
   const errorRowIndices = new Set();
 
+  // Pre-scan: find columns that are empty/null across the entire dataset.
+  // The Python pipeline skips R35 on these columns; match that behavior.
+  var allEmptyColumns = new Set();
+  if (rows.length > 0) {
+    var colNames = Object.keys(rows[0]);
+    colNames.forEach(function(col) {
+      var allEmpty = rows.every(function(r) {
+        return !r[col] || !String(r[col]).trim();
+      });
+      if (allEmpty) allEmptyColumns.add(col);
+    });
+  }
+
   // ===================================================================
   // FIRST PASS: cleaning + error rules (R01-R02, R04-R15), NO R03
   // ===================================================================
@@ -681,8 +694,9 @@ function validateRecords(rows) {
       }
     });
 
-    // Rule 35: NULL sentinel values to null
+    // Rule 35: NULL sentinel values to null (skip columns empty across entire dataset)
     csvColumns.forEach(function(col) {
+      if (allEmptyColumns.has(col)) return;
       if (data[col] !== null && NULL_SENTINELS.has(data[col].toLowerCase())) {
         const origVal = data[col];
         data[col] = null;
