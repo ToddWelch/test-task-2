@@ -105,7 +105,7 @@
     #results-section { break-inside: avoid; }
     .table-container { max-height: none; overflow: visible; }
     header { display: none !important; }
-    #btn-prev, #btn-next { display: none !important; }
+    #btn-prev, #btn-next, #page-numbers { display: none !important; }
     .badge-error, .badge-warning, .badge-cleaned {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
@@ -271,8 +271,9 @@
   <!-- Pagination -->
   <div class="flex items-center justify-between mt-4 no-print">
     <p class="text-sm" style="color: #555555;" id="page-info"></p>
-    <div class="flex gap-2">
+    <div class="flex items-center gap-1">
       <button id="btn-prev" onclick="changePage(-1)" class="px-3 py-1 text-sm rounded border transition disabled:opacity-40 hover:bg-gray-50" style="border-color: #2D2D2D; color: #2D2D2D; background-color: #FFFFFF;" disabled>Previous</button>
+      <div id="page-numbers" class="flex items-center gap-1 mx-1"></div>
       <button id="btn-next" onclick="changePage(1)" class="px-3 py-1 text-sm rounded border transition disabled:opacity-40 hover:bg-gray-50" style="border-color: #2D2D2D; color: #2D2D2D; background-color: #FFFFFF;" disabled>Next</button>
     </div>
   </div>
@@ -1367,6 +1368,7 @@ function renderTable() {
 
   document.getElementById("btn-prev").disabled = currentPage === 0;
   document.getElementById("btn-next").disabled = currentPage >= totalPages - 1;
+  renderPageNumbers();
 }
 
 function toggleDetail(idx) {
@@ -1387,6 +1389,61 @@ function changePage(delta) {
     currentPage = newPage;
     renderTable();
   }
+}
+
+function goToPage(page) {
+  const totalPages = Math.ceil(filteredIssues.length / pageSize);
+  if (page >= 0 && page < totalPages) {
+    currentPage = page;
+    renderTable();
+  }
+}
+
+function renderPageNumbers() {
+  var container = document.getElementById("page-numbers");
+  container.innerHTML = "";
+  var totalPages = Math.ceil(filteredIssues.length / pageSize);
+  if (totalPages <= 1) return;
+
+  // Determine which page numbers to show.
+  // Show first, last, current, and neighbors. Use ellipsis for gaps.
+  var pages = [];
+  var maxVisible = 7;
+
+  if (totalPages <= maxVisible) {
+    for (var i = 0; i < totalPages; i++) pages.push(i);
+  } else {
+    pages.push(0);
+    var start = Math.max(1, currentPage - 1);
+    var end = Math.min(totalPages - 2, currentPage + 1);
+    if (start > 1) pages.push(-1); // ellipsis
+    for (var i = start; i <= end; i++) pages.push(i);
+    if (end < totalPages - 2) pages.push(-1); // ellipsis
+    pages.push(totalPages - 1);
+  }
+
+  pages.forEach(function(p) {
+    if (p === -1) {
+      var span = document.createElement("span");
+      span.textContent = "...";
+      span.className = "px-1 text-sm";
+      span.style.color = "#555555";
+      container.appendChild(span);
+    } else {
+      var btn = document.createElement("button");
+      btn.textContent = String(p + 1);
+      btn.onclick = (function(page) { return function() { goToPage(page); }; })(p);
+      btn.className = "min-w-[32px] px-2 py-1 text-sm rounded border transition";
+      if (p === currentPage) {
+        btn.style.cssText = "background-color: #2D2D2D; color: #FFFFFF; border-color: #2D2D2D;";
+      } else {
+        btn.style.cssText = "background-color: #FFFFFF; color: #2D2D2D; border-color: #D1D5DB; cursor: pointer;";
+        btn.onmouseenter = function() { this.style.backgroundColor = "#F9FAFB"; };
+        btn.onmouseleave = function() { this.style.backgroundColor = "#FFFFFF"; };
+      }
+      container.appendChild(btn);
+    }
+  });
 }
 
 function updateFilterCount() {
