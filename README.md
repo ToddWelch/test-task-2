@@ -460,14 +460,11 @@ AI did not make architectural decisions without human review. Every plan was app
 
 | Phase | Time |
 |---|---|
-| Specification, data analysis, and strategy (Claude.ai) | 0.75 hours |
-| Foundation: models, constants, project setup | 0.25 hours |
-| Pipeline core: loader, validators, transformer, writer, CLI | 0.75 hours |
-| Testing: unit, integration, idempotency | 0.25 hours |
-| HTML report: initial build and iterative refinement | 0.75 hours |
-| Documentation and README | 0.25 hours |
-| Codex independent review and fixes | 0.25 hours |
-| **Total** | **3.25 hours** |
+| Planning and specification (Claude.ai) | 0.50 hours |
+| Development (pipeline core, models, constants, CLI) | 0.75 hours |
+| Testing and refinement (tests, HTML report tweaks, print fixes) | 0.50 hours |
+| README, Codex review, and final fixes | 1.00 hours |
+| **Total** | **2.75 hours** |
 
 Task 1 (AI-Powered OOS Intelligence Tool): 5.0 hours
-**Combined assessment total: 8.25 hours**
+**Combined assessment total: 7.75 hours**
