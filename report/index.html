@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Customer Data Validation Report</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  /* System font stack */
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+      Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans',
+      'Helvetica Neue', sans-serif;
+  }
+
+  /* Drag-and-drop zone */
+  .drop-zone {
+    border: 2px dashed #94a3b8;
+    transition: all 0.2s ease;
+  }
+  .drop-zone.drag-over {
+    border-color: #0d9488;
+    background-color: #f0fdfa;
+  }
+
+  /* Expandable row */
+  .detail-row {
+    display: none;
+  }
+  .detail-row.open {
+    display: table-row;
+  }
+
+  /* Severity badges */
+  .badge-error {
+    background-color: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+  }
+  .badge-warning {
+    background-color: #fffbeb;
+    color: #92400e;
+    border: 1px solid #fde68a;
+  }
+  .badge-cleaned {
+    background-color: #f0fdf4;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+  }
+
+  /* Sort indicators */
+  .sort-asc::after { content: ' \25B2'; font-size: 0.7em; }
+  .sort-desc::after { content: ' \25BC'; font-size: 0.7em; }
+
+  /* Print stylesheet */
+  @media print {
+    .no-print { display: none !important; }
+    .print-only { display: block !important; }
+    body { font-size: 10pt; }
+    .drop-zone { display: none !important; }
+    #upload-section { display: none !important; }
+    #results-section { break-inside: avoid; }
+    .badge-error, .badge-warning, .badge-cleaned {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+  }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- Header -->
+<header class="bg-slate-800 text-white shadow-lg no-print">
+  <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-xl font-semibold tracking-tight">Customer Data Validation Report</h1>
+        <p class="text-slate-300 text-sm mt-0.5">Data Pipeline Quality Assurance Tool</p>
+      </div>
+      <div class="flex gap-3">
+        <button id="btn-print" onclick="window.print()"
+          class="hidden px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 rounded border border-slate-500 transition">
+          Print Report
+        </button>
+        <button id="btn-export" onclick="exportCSV()"
+          class="hidden px-3 py-1.5 text-sm bg-teal-600 hover:bg-teal-500 rounded border border-teal-500 transition">
+          Export CSV
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- Print header (only visible in print) -->
+<div class="print-only hidden px-4 py-4 border-b-2 border-slate-800 mb-4">
+  <h1 class="text-2xl font-bold">Customer Data Validation Report</h1>
+  <p class="text-sm text-gray-600" id="print-timestamp"></p>
+</div>
+
+<!-- Upload Section -->
+<section id="upload-section" class="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+  <div class="drop-zone rounded-lg p-12 text-center cursor-pointer bg-white shadow-sm"
+       id="drop-zone"
+       onclick="document.getElementById('file-input').click()">
+    <svg class="mx-auto h-12 w-12 text-slate-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+    </svg>
+    <p class="text-lg font-medium text-slate-700">Drop a CSV file here, or click to browse</p>
+    <p class="text-sm text-slate-500 mt-1">Accepts any CSV with matching column headers</p>
+    <input type="file" id="file-input" accept=".csv" class="hidden">
+  </div>
+  <div id="loading-indicator" class="hidden text-center py-8">
+    <div class="inline-block h-8 w-8 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+    <p class="mt-2 text-slate-600 text-sm">Processing records...</p>
+  </div>
+</section>
+
+<!-- Results Section (hidden until CSV processed) -->
+<section id="results-section" class="hidden max-w-7xl mx-auto px-4 pb-12 sm:px-6 lg:px-8">
+
+  <!-- Dashboard Cards -->
+  <div id="dashboard" class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 text-center">
+      <p class="text-3xl font-bold text-slate-800" id="stat-total">0</p>
+      <p class="text-sm text-slate-500 mt-1">Total Records</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-green-200 p-4 text-center">
+      <p class="text-3xl font-bold text-green-700" id="stat-clean">0</p>
+      <p class="text-sm text-slate-500 mt-1">Clean</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-red-200 p-4 text-center">
+      <p class="text-3xl font-bold text-red-700" id="stat-rejected">0</p>
+      <p class="text-sm text-slate-500 mt-1">Rejected</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-amber-200 p-4 text-center">
+      <p class="text-3xl font-bold text-amber-700" id="stat-warnings">0</p>
+      <p class="text-sm text-slate-500 mt-1">Warnings</p>
+    </div>
+    <div class="bg-white rounded-lg shadow-sm border border-teal-200 p-4 text-center">
+      <p class="text-3xl font-bold text-teal-700" id="stat-cleaned">0</p>
+      <p class="text-sm text-slate-500 mt-1">Cleaning Actions</p>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4 no-print">
+    <div class="flex flex-wrap gap-4 items-center">
+      <div>
+        <label class="text-xs font-medium text-slate-500 uppercase tracking-wide">Severity</label>
+        <select id="filter-severity" onchange="applyFilters()" class="block mt-1 text-sm border-slate-300 rounded px-2 py-1.5 border">
+          <option value="">All</option>
+          <option value="ERROR">Error</option>
+          <option value="WARNING">Warning</option>
+          <option value="CLEANED">Cleaned</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-500 uppercase tracking-wide">Rule ID</label>
+        <select id="filter-rule" onchange="applyFilters()" class="block mt-1 text-sm border-slate-300 rounded px-2 py-1.5 border">
+          <option value="">All Rules</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-500 uppercase tracking-wide">Field</label>
+        <select id="filter-field" onchange="applyFilters()" class="block mt-1 text-sm border-slate-300 rounded px-2 py-1.5 border">
+          <option value="">All Fields</option>
+        </select>
+      </div>
+      <div class="flex-1 min-w-[200px]">
+        <label class="text-xs font-medium text-slate-500 uppercase tracking-wide">Search</label>
+        <input id="filter-search" type="text" placeholder="Search messages, emails, values..."
+               oninput="applyFilters()"
+               class="block mt-1 w-full text-sm border-slate-300 rounded px-2 py-1.5 border">
+      </div>
+      <div class="self-end">
+        <button onclick="clearFilters()" class="text-sm text-teal-600 hover:text-teal-800 py-1.5">Clear filters</button>
+      </div>
+    </div>
+    <p class="text-xs text-slate-400 mt-2" id="filter-count"></p>
+  </div>
+
+  <!-- Results Table -->
+  <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+    <table class="w-full text-sm" id="results-table">
+      <thead class="bg-slate-50 border-b border-slate-200">
+        <tr>
+          <th class="px-3 py-2.5 text-left font-medium text-slate-600 cursor-pointer select-none" onclick="sortTable('row_number')">Row</th>
+          <th class="px-3 py-2.5 text-left font-medium text-slate-600 cursor-pointer select-none" onclick="sortTable('severity')">Severity</th>
+          <th class="px-3 py-2.5 text-left font-medium text-slate-600 cursor-pointer select-none" onclick="sortTable('rule_id')">Rule</th>
+          <th class="px-3 py-2.5 text-left font-medium text-slate-600 cursor-pointer select-none" onclick="sortTable('field')">Field</th>
+          <th class="px-3 py-2.5 text-left font-medium text-slate-600 cursor-pointer select-none" onclick="sortTable('message')">Message</th>
+          <th class="px-3 py-2.5 text-left font-medium text-slate-600">Original</th>
+          <th class="px-3 py-2.5 text-left font-medium text-slate-600">Corrected</th>
+        </tr>
+      </thead>
+      <tbody id="results-body" class="divide-y divide-slate-100">
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  <div class="flex items-center justify-between mt-4 no-print">
+    <p class="text-sm text-slate-500" id="page-info"></p>
+    <div class="flex gap-2">
+      <button id="btn-prev" onclick="changePage(-1)" class="px-3 py-1 text-sm border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-40" disabled>Previous</button>
+      <button id="btn-next" onclick="changePage(1)" class="px-3 py-1 text-sm border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-40" disabled>Next</button>
+    </div>
+  </div>
+
+</section>
+
+<script>
+// =========================================================================
+// CONSTANTS (mirrored from Python src/constants.py)
+// =========================================================================
+
+const STATE_ABBREVIATIONS = {
+  "alabama":"AL","alaska":"AK","arizona":"AZ","arkansas":"AR","california":"CA",
+  "colorado":"CO","connecticut":"CT","delaware":"DE","florida":"FL","georgia":"GA",
+  "hawaii":"HI","idaho":"ID","illinois":"IL","indiana":"IN","iowa":"IA",
+  "kansas":"KS","kentucky":"KY","louisiana":"LA","maine":"ME","maryland":"MD",
+  "massachusetts":"MA","michigan":"MI","minnesota":"MN","mississippi":"MS",
+  "missouri":"MO","montana":"MT","nebraska":"NE","nevada":"NV",
+  "new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY",
+  "north carolina":"NC","north dakota":"ND","ohio":"OH","oklahoma":"OK",
+  "oregon":"OR","pennsylvania":"PA","rhode island":"RI","south carolina":"SC",
+  "south dakota":"SD","tennessee":"TN","texas":"TX","utah":"UT","vermont":"VT",
+  "virginia":"VA","washington":"WA","west virginia":"WV","wisconsin":"WI",
+  "wyoming":"WY","district of columbia":"DC",
+  "american samoa":"AS","guam":"GU","northern mariana islands":"MP",
+  "puerto rico":"PR","us virgin islands":"VI","u.s. virgin islands":"VI"
+};
+
+const VALID_STATE_ABBREVS = new Set(Object.values(STATE_ABBREVIATIONS));
+
+const VALID_LOYALTY_TIERS = ["Bronze", "Silver", "Gold", "Platinum"];
+const LOYALTY_TIER_LOOKUP = {};
+VALID_LOYALTY_TIERS.forEach(t => { LOYALTY_TIER_LOOKUP[t.toLowerCase()] = t; });
+
+const NEWSLETTER_TRUTHY = new Set(["true", "1", "yes", "y", "t"]);
+const NEWSLETTER_FALSY = new Set(["false", "0", "no", "n", "f"]);
+const NULL_SENTINELS = new Set(["n/a", "na", "none", "null", ""]);
+
+const MIN_CUSTOMER_AGE = 13;
+const MAX_CUSTOMER_AGE = 120;
+const AOV_OUTLIER_MIN = 1.0;
+const AOV_OUTLIER_MAX = 1000.0;
+const TIER_SPEND_THRESHOLDS = {
+  "Platinum": { max_below: 100.0 },
+  "Bronze": { min_above: 4000.0 }
+};
+
+// Regex patterns
+const EMAIL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]*@[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+const DOUBLE_AT_PATTERN = /@@/;
+const LEADING_DOT_LOCAL = /^\..*@/;
+const TRAILING_DOT_LOCAL = /\.@/;
+const CONSECUTIVE_DOTS = /\.\./;
+const PHONE_DIGITS_PATTERN = /^1?(\d{10})$/;
+const PHONE_7_DIGITS_PATTERN = /^(\d{7})$/;
+const ZIP_CODE_PATTERN = /^\d{5}$/;
+const NAME_SUSPICIOUS_CHARS = /[^a-zA-Z\s\-'\.]+/;
+const CITY_HAS_DIGITS = /\d/;
+const DATE_SLASH_PATTERN = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/;
+const DATE_DASH_MDY_PATTERN = /^(\d{1,2})-(\d{1,2})-(\d{2,4})$/;
+const DATE_ISO_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+
+// =========================================================================
+// HELPER FUNCTIONS
+// =========================================================================
+
+function getToday() {
+  const now = new Date();
+  return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
+}
+
+function parseDate(value) {
+  if (!value) return null;
+  const parts = value.split("-");
+  if (parts.length !== 3) return null;
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
+  // Validate it is a real date
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return { year: y, month: m, day: d };
+}
+
+function dateAfter(a, b) {
+  // Returns true if date a is after date b
+  if (a.year !== b.year) return a.year > b.year;
+  if (a.month !== b.month) return a.month > b.month;
+  return a.day > b.day;
+}
+
+function dateBefore(a, b) {
+  return dateAfter(b, a);
+}
+
+function parseFloat2(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const v = parseFloat(value);
+  return isNaN(v) ? null : v;
+}
+
+function parseInt2(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const v = parseFloat(value);
+  if (isNaN(v)) return null;
+  return Math.floor(v);
+}
+
+function isBlank(value) {
+  return value === null || value === undefined || String(value).trim() === "";
+}
+
+function normalizeDate(value) {
+  if (!value) return value;
+  if (DATE_ISO_PATTERN.test(value)) return value;
+
+  let match = DATE_SLASH_PATTERN.exec(value);
+  if (match) {
+    let month = parseInt(match[1], 10);
+    let day = parseInt(match[2], 10);
+    let year = parseInt(match[3], 10);
+    if (year < 100) year = year < 30 ? year + 2000 : year + 1900;
+    const dt = new Date(year, month - 1, day);
+    if (dt.getFullYear() === year && dt.getMonth() === month - 1 && dt.getDate() === day) {
+      return year + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+    }
+    return value;
+  }
+
+  match = DATE_DASH_MDY_PATTERN.exec(value);
+  if (match) {
+    let month = parseInt(match[1], 10);
+    let day = parseInt(match[2], 10);
+    let year = parseInt(match[3], 10);
+    if (year < 100) year = year < 30 ? year + 2000 : year + 1900;
+    const dt = new Date(year, month - 1, day);
+    if (dt.getFullYear() === year && dt.getMonth() === month - 1 && dt.getDate() === day) {
+      return year + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+    }
+    return value;
+  }
+
+  return value;
+}
+
+function normalizePhone(value) {
+  if (!value) return value;
+  const digits = value.replace(/\D/g, "");
+  const m = PHONE_DIGITS_PATTERN.exec(digits);
+  if (m) {
+    const d = m[1];
+    return "(" + d.slice(0,3) + ") " + d.slice(3,6) + "-" + d.slice(6);
+  }
+  if (PHONE_7_DIGITS_PATTERN.test(digits)) return value;
+  return value;
+}
+
+function normalizeState(value) {
+  if (!value) return value;
+  const cleaned = value.trim();
+  const noPeriods = cleaned.replace(/\./g, "").trim();
+  if (noPeriods.length === 2 && VALID_STATE_ABBREVS.has(noPeriods.toUpperCase())) {
+    return noPeriods.toUpperCase();
+  }
+  const lookup = noPeriods.toLowerCase();
+  if (STATE_ABBREVIATIONS[lookup]) return STATE_ABBREVIATIONS[lookup];
+  return cleaned.length <= 2 ? cleaned.toUpperCase() : cleaned;
+}
+
+function normalizeLoyaltyTier(value) {
+  if (!value) return value;
+  const lookup = value.trim().toLowerCase();
+  return LOYALTY_TIER_LOOKUP[lookup] || value;
+}
+
+function normalizeNewsletter(value) {
+  if (!value) return null;
+  const lower = value.trim().toLowerCase();
+  if (NEWSLETTER_TRUTHY.has(lower)) return "True";
+  if (NEWSLETTER_FALSY.has(lower)) return "False";
+  return value;
+}
+
+
+// =========================================================================
+// VALIDATION ENGINE
+// =========================================================================
+
+function validateRecords(rows) {
+  const today = getToday();
+  const allIssues = [];
+  const seenEmails = new Set();
+  const fuzzyDupes = {};
+  let cleanCount = 0;
+  let rejectedCount = 0;
+  let warningRecordCount = 0;
+  let cleaningActionsCount = 0;
+  const recordsWithErrors = new Set();
+  const recordsWithWarnings = new Set();
+
+  // Store original rows for detail view
+  const originalRows = rows.map(r => Object.assign({}, r));
+
+  rows.forEach(function(row, idx) {
+    const rowNum = idx + 2; // 1-based, plus header row
+    const issues = [];
+    const data = {};
+
+    // Copy and trim all fields (Rule 29: whitespace trimming)
+    const csvColumns = [
+      "customer_id", "first_name", "last_name", "email", "phone",
+      "date_of_birth", "signup_date", "city", "state", "zip_code",
+      "loyalty_tier", "total_spend", "num_orders", "last_order_date",
+      "newsletter_opt_in", "preferred_contact", "notes"
+    ];
+    csvColumns.forEach(function(col) {
+      let val = row[col];
+      if (val !== null && val !== undefined) {
+        const trimmed = String(val).trim();
+        if (trimmed !== String(val)) {
+          issues.push({
+            row_number: rowNum,
+            customer_id: (row.customer_id || "").trim(),
+            field: col,
+            rule_id: "R29_WHITESPACE_TRIM",
+            severity: "CLEANED",
+            message: "Leading/trailing whitespace removed from " + col,
+            original_value: "(had whitespace)",
+            corrected_value: trimmed
+          });
+        }
+        data[col] = trimmed;
+      } else {
+        data[col] = null;
+      }
+    });
+
+    // Rule 35: NULL sentinel values to null
+    csvColumns.forEach(function(col) {
+      if (data[col] !== null && NULL_SENTINELS.has(data[col].toLowerCase())) {
+        const origVal = data[col];
+        data[col] = null;
+        issues.push({
+          row_number: rowNum,
+          customer_id: data.customer_id,
+          field: col,
+          rule_id: "R35_NULL_SENTINEL",
+          severity: "CLEANED",
+          message: "NULL sentinel '" + origVal + "' converted to NULL",
+          original_value: origVal,
+          corrected_value: null
+        });
+      }
+    });
+
+    // Rule 30: State normalization
+    if (data.state) {
+      const origState = data.state;
+      const normState = normalizeState(origState);
+      if (normState !== origState) {
+        data.state = normState;
+        issues.push({
+          row_number: rowNum,
+          customer_id: data.customer_id,
+          field: "state",
+          rule_id: "R30_STATE_NORMALIZE",
+          severity: "CLEANED",
+          message: "State normalized from '" + origState + "' to '" + normState + "'",
+          original_value: origState,
+          corrected_value: normState
+        });
+      }
+    }
+
+    // Rule 31: Phone normalization
+    if (data.phone) {
+      const origPhone = data.phone;
+      const normPhone = normalizePhone(origPhone);
+      if (normPhone !== origPhone) {
+        data.phone = normPhone;
+        issues.push({
+          row_number: rowNum,
+          customer_id: data.customer_id,
+          field: "phone",
+          rule_id: "R31_PHONE_NORMALIZE",
+          severity: "CLEANED",
+          message: "Phone normalized to standard format",
+          original_value: origPhone,
+          corrected_value: normPhone
+        });
+      }
+    }
+
+    // Zip code normalization: strip non-digit characters
+    if (data.zip_code) {
+      const origZip = data.zip_code;
+      const cleanedZip = origZip.replace(/\D/g, "");
+      if (cleanedZip !== origZip && ZIP_CODE_PATTERN.test(cleanedZip)) {
+        data.zip_code = cleanedZip;
+        issues.push({
+          row_number: rowNum,
+          customer_id: data.customer_id,
+          field: "zip_code",
+          rule_id: "R29_WHITESPACE_TRIM",
+          severity: "CLEANED",
+          message: "Zip code cleaned from '" + origZip + "' to '" + cleanedZip + "'",
+          original_value: origZip,
+          corrected_value: cleanedZip
+        });
+      }
+    }
+
+    // Rule 32: Loyalty tier case normalization
+    if (data.loyalty_tier) {
+      const origTier = data.loyalty_tier;
+      const normTier = normalizeLoyaltyTier(origTier);
+      if (normTier !== origTier) {
+        data.loyalty_tier = normTier;
+        issues.push({
+          row_number: rowNum,
+          customer_id: data.customer_id,
+          field: "loyalty_tier",
+          rule_id: "R32_TIER_NORMALIZE",
+          severity: "CLEANED",
+          message: "Loyalty tier normalized from '" + origTier + "' to '" + normTier + "'",
+          original_value: origTier,
+          corrected_value: normTier
+        });
+      }
+    }
+
+    // Rule 33: Newsletter boolean normalization
+    if (data.newsletter_opt_in !== null) {
+      const origNL = data.newsletter_opt_in;
+      const normNL = normalizeNewsletter(origNL);
+      if (normNL !== origNL) {
+        data.newsletter_opt_in = normNL;
+        issues.push({
+          row_number: rowNum,
+          customer_id: data.customer_id,
+          field: "newsletter_opt_in",
+          rule_id: "R33_NEWSLETTER_NORMALIZE",
+          severity: "CLEANED",
+          message: "Newsletter opt-in normalized from '" + origNL + "' to '" + normNL + "'",
+          original_value: origNL,
+          corrected_value: normNL
+        });
+      }
+    }
+
+    // Rule 34: Date format normalization
+    ["signup_date", "date_of_birth", "last_order_date"].forEach(function(dateField) {
+      if (data[dateField]) {
+        const origDate = data[dateField];
+        const normDate = normalizeDate(origDate);
+        if (normDate !== origDate) {
+          data[dateField] = normDate;
+          issues.push({
+            row_number: rowNum,
+            customer_id: data.customer_id,
+            field: dateField,
+            rule_id: "R34_DATE_NORMALIZE",
+            severity: "CLEANED",
+            message: "Date normalized from '" + origDate + "' to '" + normDate + "'",
+            original_value: origDate,
+            corrected_value: normDate
+          });
+        }
+        // Verify ISO format after normalization
+        const currentVal = data[dateField];
+        if (currentVal && !DATE_ISO_PATTERN.test(currentVal)) {
+          if (dateField !== "signup_date") {
+            data[dateField] = null;
+            issues.push({
+              row_number: rowNum,
+              customer_id: data.customer_id,
+              field: dateField,
+              rule_id: "R34_DATE_NORMALIZE",
+              severity: "CLEANED",
+              message: "Unparseable date '" + currentVal + "' set to NULL",
+              original_value: currentVal,
+              corrected_value: null
+            });
+          }
+        } else if (currentVal && DATE_ISO_PATTERN.test(currentVal)) {
+          const parsed = parseDate(currentVal);
+          if (parsed === null && dateField !== "signup_date") {
+            data[dateField] = null;
+            issues.push({
+              row_number: rowNum,
+              customer_id: data.customer_id,
+              field: dateField,
+              rule_id: "R34_DATE_NORMALIZE",
+              severity: "CLEANED",
+              message: "Invalid date '" + currentVal + "' set to NULL",
+              original_value: currentVal,
+              corrected_value: null
+            });
+          }
+        }
+      }
+    });
+
+    // =====================================================================
+    // ERROR RULES (1-15)
+    // =====================================================================
+    const errorIssues = [];
+
+    // Rule 1: Missing email
+    if (!data.email) {
+      errorIssues.push({
+        row_number: rowNum,
+        customer_id: data.customer_id,
+        field: "email",
+        rule_id: "R01_MISSING_EMAIL",
+        severity: "ERROR",
+        message: "Missing email address (required field)",
+        original_value: null,
+        corrected_value: null
+      });
+    } else {
+      const email = data.email;
+      const emailLower = email.toLowerCase();
+      let emailInvalid = false;
+
+      // Rule 2: Invalid email format
+      if (DOUBLE_AT_PATTERN.test(email)) {
+        errorIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: "email", rule_id: "R02_INVALID_EMAIL", severity: "ERROR",
+          message: "Invalid email format: double @@ in '" + email + "'",
+          original_value: email, corrected_value: null
+        });
+        emailInvalid = true;
+      } else if (LEADING_DOT_LOCAL.test(email)) {
+        errorIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: "email", rule_id: "R02_INVALID_EMAIL", severity: "ERROR",
+          message: "Invalid email format: leading dot in local part '" + email + "'",
+          original_value: email, corrected_value: null
+        });
+        emailInvalid = true;
+      } else if (TRAILING_DOT_LOCAL.test(email)) {
+        errorIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: "email", rule_id: "R02_INVALID_EMAIL", severity: "ERROR",
+          message: "Invalid email format: trailing dot in local part '" + email + "'",
+          original_value: email, corrected_value: null
+        });
+        emailInvalid = true;
+      } else {
+        const localPart = email.indexOf("@") >= 0 ? email.split("@")[0] : email;
+        if (CONSECUTIVE_DOTS.test(localPart)) {
+          errorIssues.push({
+            row_number: rowNum, customer_id: data.customer_id,
+            field: "email", rule_id: "R02_INVALID_EMAIL", severity: "ERROR",
+            message: "Invalid email format: consecutive dots in '" + email + "'",
+            original_value: email, corrected_value: null
+          });
+          emailInvalid = true;
+        } else if (!EMAIL_PATTERN.test(email)) {
+          errorIssues.push({
+            row_number: rowNum, customer_id: data.customer_id,
+            field: "email", rule_id: "R02_INVALID_EMAIL", severity: "ERROR",
+            message: "Invalid email format: '" + email + "'",
+            original_value: email, corrected_value: null
+          });
+          emailInvalid = true;
+        }
+      }
+
+      // Rule 3: Duplicate email
+      if (!emailInvalid) {
+        if (seenEmails.has(emailLower)) {
+          errorIssues.push({
+            row_number: rowNum, customer_id: data.customer_id,
+            field: "email", rule_id: "R03_DUPLICATE_EMAIL", severity: "ERROR",
+            message: "Duplicate email address: '" + email + "'",
+            original_value: email, corrected_value: null
+          });
+        } else {
+          seenEmails.add(emailLower);
+        }
+      }
+    }
+
+    // Rule 4: Missing both names
+    if (!data.first_name && !data.last_name) {
+      errorIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "first_name,last_name", rule_id: "R04_MISSING_BOTH_NAMES", severity: "ERROR",
+        message: "Missing both first name and last name",
+        original_value: null, corrected_value: null
+      });
+    }
+
+    // Date-based rules (5, 6, 7)
+    const dobStr = data.date_of_birth;
+    if (dobStr) {
+      const dob = parseDate(dobStr);
+      if (dob) {
+        if (dateAfter(dob, today)) {
+          // Rule 5: Future birth date
+          errorIssues.push({
+            row_number: rowNum, customer_id: data.customer_id,
+            field: "date_of_birth", rule_id: "R05_FUTURE_DOB", severity: "ERROR",
+            message: "Date of birth is in the future: " + dobStr,
+            original_value: dobStr, corrected_value: null
+          });
+        } else {
+          let age = today.year - dob.year;
+          if (today.month < dob.month || (today.month === dob.month && today.day < dob.day)) {
+            age -= 1;
+          }
+          // Rule 6: Under 13 (COPPA)
+          if (age < MIN_CUSTOMER_AGE) {
+            errorIssues.push({
+              row_number: rowNum, customer_id: data.customer_id,
+              field: "date_of_birth", rule_id: "R06_UNDER_13_COPPA", severity: "ERROR",
+              message: "Customer is under 13 (age " + age + ", COPPA violation): " + dobStr,
+              original_value: dobStr, corrected_value: null
+            });
+          }
+          // Rule 7: Over 120
+          if (age > MAX_CUSTOMER_AGE) {
+            errorIssues.push({
+              row_number: rowNum, customer_id: data.customer_id,
+              field: "date_of_birth", rule_id: "R07_OVER_120", severity: "ERROR",
+              message: "Customer is over 120 (age " + age + ", likely data error): " + dobStr,
+              original_value: dobStr, corrected_value: null
+            });
+          }
+        }
+      }
+    }
+
+    // Rule 8: Negative total_spend
+    const spend = parseFloat2(data.total_spend);
+    if (spend !== null && spend < 0) {
+      errorIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "total_spend", rule_id: "R08_NEGATIVE_SPEND", severity: "ERROR",
+        message: "Negative total spend (sentinel value): " + data.total_spend,
+        original_value: data.total_spend, corrected_value: null
+      });
+    }
+
+    // Rule 9: Invalid zip code
+    const zipVal = data.zip_code;
+    if (zipVal !== null) {
+      const zipDigits = zipVal.replace(/\D/g, "");
+      if (!ZIP_CODE_PATTERN.test(zipDigits)) {
+        errorIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: "zip_code", rule_id: "R09_INVALID_ZIP", severity: "ERROR",
+          message: "Invalid zip code (not 5 digits after cleaning): '" + zipVal + "'",
+          original_value: zipVal, corrected_value: null
+        });
+      }
+    }
+
+    // Rule 10: Missing signup_date
+    if (!data.signup_date) {
+      errorIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "signup_date", rule_id: "R10_MISSING_SIGNUP_DATE", severity: "ERROR",
+        message: "Missing signup date (required for customer timeline)",
+        original_value: null, corrected_value: null
+      });
+    }
+
+    const signupDate = parseDate(data.signup_date);
+    const lastOrderDate = parseDate(data.last_order_date);
+
+    // Rule 11: Last order before signup
+    if (signupDate && lastOrderDate) {
+      if (dateBefore(lastOrderDate, signupDate)) {
+        errorIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: "last_order_date", rule_id: "R11_ORDER_BEFORE_SIGNUP", severity: "ERROR",
+          message: "Last order date (" + data.last_order_date + ") is before signup date (" + data.signup_date + ")",
+          original_value: data.last_order_date, corrected_value: null
+        });
+      }
+    }
+
+    // Rule 12: Signup date in the future
+    if (signupDate && dateAfter(signupDate, today)) {
+      errorIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "signup_date", rule_id: "R12_FUTURE_SIGNUP", severity: "ERROR",
+        message: "Signup date is in the future: " + data.signup_date,
+        original_value: data.signup_date, corrected_value: null
+      });
+    }
+
+    // Rule 13: Last order date in the future
+    if (lastOrderDate && dateAfter(lastOrderDate, today)) {
+      errorIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "last_order_date", rule_id: "R13_FUTURE_LAST_ORDER", severity: "ERROR",
+        message: "Last order date is in the future: " + data.last_order_date,
+        original_value: data.last_order_date, corrected_value: null
+      });
+    }
+
+    // Rule 14: Zero orders but positive spend
+    const orders = parseInt2(data.num_orders);
+    if (spend !== null || orders !== null) {
+      if (orders !== null && orders === 0 && spend !== null && spend > 0) {
+        errorIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: "num_orders,total_spend", rule_id: "R14_ZERO_ORDERS_POSITIVE_SPEND", severity: "ERROR",
+          message: "Zero orders but positive spend ($" + spend + ")",
+          original_value: "num_orders=0, total_spend=" + spend, corrected_value: null
+        });
+      }
+    }
+
+    // Rule 15: Positive orders but zero/missing spend
+    if (spend !== null || orders !== null) {
+      if (orders !== null && orders > 0) {
+        if (spend === null || spend === 0) {
+          errorIssues.push({
+            row_number: rowNum, customer_id: data.customer_id,
+            field: "num_orders,total_spend", rule_id: "R15_POSITIVE_ORDERS_NO_SPEND", severity: "ERROR",
+            message: "Positive orders (" + orders + ") but zero or missing spend",
+            original_value: "num_orders=" + orders + ", total_spend=" + data.total_spend, corrected_value: null
+          });
+        }
+      }
+    }
+
+    // =====================================================================
+    // WARNING RULES (16-28)
+    // =====================================================================
+    const warningIssues = [];
+
+    // Rule 16: Missing first_name (but last_name exists)
+    if (!data.first_name && data.last_name) {
+      warningIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "first_name", rule_id: "R16_MISSING_FIRST_NAME", severity: "WARNING",
+        message: "Missing first name",
+        original_value: null, corrected_value: null
+      });
+    }
+
+    // Rule 17: Missing last_name (but first_name exists)
+    if (!data.last_name && data.first_name) {
+      warningIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "last_name", rule_id: "R17_MISSING_LAST_NAME", severity: "WARNING",
+        message: "Missing last name",
+        original_value: null, corrected_value: null
+      });
+    }
+
+    // Rule 18: Missing phone
+    if (!data.phone) {
+      warningIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "phone", rule_id: "R18_MISSING_PHONE", severity: "WARNING",
+        message: "Missing phone number",
+        original_value: null, corrected_value: null
+      });
+    }
+
+    // Rule 19: Missing DOB
+    if (!data.date_of_birth) {
+      warningIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "date_of_birth", rule_id: "R19_MISSING_DOB", severity: "WARNING",
+        message: "Missing date of birth",
+        original_value: null, corrected_value: null
+      });
+    }
+
+    // Rule 20: Missing loyalty_tier
+    if (!data.loyalty_tier) {
+      warningIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "loyalty_tier", rule_id: "R20_MISSING_LOYALTY_TIER", severity: "WARNING",
+        message: "Missing loyalty tier",
+        original_value: null, corrected_value: null
+      });
+    }
+
+    // Rule 21: Missing preferred_contact
+    if (!data.preferred_contact) {
+      warningIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "preferred_contact", rule_id: "R21_MISSING_PREFERRED_CONTACT", severity: "WARNING",
+        message: "Missing preferred contact method",
+        original_value: null, corrected_value: null
+      });
+    }
+
+    // Rule 22: Name contains digits or special characters
+    ["first_name", "last_name"].forEach(function(nameField) {
+      const nameVal = data[nameField];
+      if (nameVal && NAME_SUSPICIOUS_CHARS.test(nameVal)) {
+        warningIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: nameField, rule_id: "R22_NAME_SUSPICIOUS_CHARS", severity: "WARNING",
+          message: nameField + " contains digits or special characters: '" + nameVal + "'",
+          original_value: nameVal, corrected_value: null
+        });
+      }
+    });
+
+    // Rule 23: Single-character name
+    ["first_name", "last_name"].forEach(function(nameField) {
+      const nameVal = data[nameField];
+      if (nameVal && nameVal.trim().length === 1) {
+        warningIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: nameField, rule_id: "R23_SINGLE_CHAR_NAME", severity: "WARNING",
+          message: nameField + " is a single character: '" + nameVal + "'",
+          original_value: nameVal, corrected_value: null
+        });
+      }
+    });
+
+    // Rule 24: City contains digits
+    const cityVal = data.city;
+    if (cityVal && CITY_HAS_DIGITS.test(cityVal)) {
+      warningIssues.push({
+        row_number: rowNum, customer_id: data.customer_id,
+        field: "city", rule_id: "R24_CITY_HAS_DIGITS", severity: "WARNING",
+        message: "City contains digits: '" + cityVal + "'",
+        original_value: cityVal, corrected_value: null
+      });
+    }
+
+    // Rule 25: Tier-spend mismatch
+    const tierVal = data.loyalty_tier;
+    if (tierVal && spend !== null) {
+      const thresholds = TIER_SPEND_THRESHOLDS[tierVal];
+      if (thresholds) {
+        if (thresholds.max_below !== undefined && spend < thresholds.max_below) {
+          warningIssues.push({
+            row_number: rowNum, customer_id: data.customer_id,
+            field: "loyalty_tier,total_spend", rule_id: "R25_TIER_SPEND_MISMATCH", severity: "WARNING",
+            message: tierVal + " tier with only $" + spend.toFixed(2) + " total spend",
+            original_value: "tier=" + tierVal + ", spend=" + spend, corrected_value: null
+          });
+        }
+        if (thresholds.min_above !== undefined && spend > thresholds.min_above) {
+          warningIssues.push({
+            row_number: rowNum, customer_id: data.customer_id,
+            field: "loyalty_tier,total_spend", rule_id: "R25_TIER_SPEND_MISMATCH", severity: "WARNING",
+            message: tierVal + " tier with $" + spend.toFixed(2) + " total spend (high for tier)",
+            original_value: "tier=" + tierVal + ", spend=" + spend, corrected_value: null
+          });
+        }
+      }
+    }
+
+    // Rule 26: AOV outlier
+    if (spend !== null && orders !== null && orders > 0) {
+      const aov = spend / orders;
+      if (aov > AOV_OUTLIER_MAX) {
+        warningIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: "total_spend,num_orders", rule_id: "R26_AOV_OUTLIER", severity: "WARNING",
+          message: "Average order value outlier: $" + aov.toFixed(2) + " (spend=" + spend + ", orders=" + orders + ")",
+          original_value: "aov=" + aov.toFixed(2), corrected_value: null
+        });
+      } else if (aov < AOV_OUTLIER_MIN) {
+        warningIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: "total_spend,num_orders", rule_id: "R26_AOV_OUTLIER", severity: "WARNING",
+          message: "Average order value outlier: $" + aov.toFixed(2) + " (spend=" + spend + ", orders=" + orders + ")",
+          original_value: "aov=" + aov.toFixed(2), corrected_value: null
+        });
+      }
+    }
+
+    // Rule 27: Phone missing area code
+    const phoneVal = data.phone;
+    if (phoneVal) {
+      const phoneDigits = phoneVal.replace(/\D/g, "");
+      if (PHONE_7_DIGITS_PATTERN.test(phoneDigits)) {
+        warningIssues.push({
+          row_number: rowNum, customer_id: data.customer_id,
+          field: "phone", rule_id: "R27_PHONE_MISSING_AREA_CODE", severity: "WARNING",
+          message: "Phone number appears to be missing area code (7 digits): '" + phoneVal + "'",
+          original_value: phoneVal, corrected_value: null
+        });
+      }
+    }
+
+    // Rule 28: Fuzzy duplicate
+    const lastName = data.last_name;
+    const zipCode = data.zip_code;
+    const emailAddr = data.email;
+    if (lastName && zipCode && emailAddr) {
+      const fuzzyKey = lastName.toLowerCase().trim() + "|" + zipCode.trim();
+      if (fuzzyDupes[fuzzyKey]) {
+        const existing = fuzzyDupes[fuzzyKey];
+        let warned = false;
+        for (let i = 0; i < existing.length; i++) {
+          if (existing[i].email.toLowerCase() !== emailAddr.toLowerCase()) {
+            warningIssues.push({
+              row_number: rowNum, customer_id: data.customer_id,
+              field: "last_name,zip_code,email", rule_id: "R28_FUZZY_DUPLICATE", severity: "WARNING",
+              message: "Potential duplicate: same last name '" + lastName + "' and zip '" + zipCode + "' as row " + existing[i].row + " but different email",
+              original_value: emailAddr, corrected_value: null
+            });
+            warned = true;
+            break;
+          }
+        }
+        fuzzyDupes[fuzzyKey].push({ email: emailAddr, row: rowNum });
+      } else {
+        fuzzyDupes[fuzzyKey] = [{ email: emailAddr, row: rowNum }];
+      }
+    }
+
+    // Combine all issues
+    const allRowIssues = issues.concat(errorIssues, warningIssues);
+    const hasErrors = errorIssues.length > 0;
+
+    if (hasErrors) {
+      rejectedCount++;
+      recordsWithErrors.add(rowNum);
+    } else {
+      cleanCount++;
+    }
+    if (warningIssues.length > 0) {
+      recordsWithWarnings.add(rowNum);
+    }
+    cleaningActionsCount += issues.length;
+
+    // Attach original row data to each issue for detail view
+    allRowIssues.forEach(function(issue) {
+      issue._originalRow = originalRows[idx];
+    });
+
+    allIssues.push.apply(allIssues, allRowIssues);
+  });
+
+  // Count records with warnings that are NOT also rejected
+  warningRecordCount = 0;
+  recordsWithWarnings.forEach(function(rowNum) {
+    if (!recordsWithErrors.has(rowNum)) {
+      warningRecordCount++;
+    }
+  });
+
+  return {
+    total: rows.length,
+    clean: cleanCount,
+    rejected: rejectedCount,
+    warnings: warningRecordCount,
+    cleaningActions: cleaningActionsCount,
+    issues: allIssues
+  };
+}
+
+
+// =========================================================================
+// UI STATE
+// =========================================================================
+
+let allIssues = [];
+let filteredIssues = [];
+let currentPage = 0;
+const pageSize = 50;
+let sortColumn = "row_number";
+let sortDirection = "asc";
+
+
+// =========================================================================
+// UI FUNCTIONS
+// =========================================================================
+
+function processFile(file) {
+  document.getElementById("drop-zone").classList.add("hidden");
+  document.getElementById("loading-indicator").classList.remove("hidden");
+
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    complete: function(results) {
+      document.getElementById("loading-indicator").classList.add("hidden");
+
+      if (!results.data || results.data.length === 0) {
+        alert("No data found in CSV file.");
+        document.getElementById("drop-zone").classList.remove("hidden");
+        return;
+      }
+
+      const outcome = validateRecords(results.data);
+      allIssues = outcome.issues;
+
+      // Update dashboard
+      document.getElementById("stat-total").textContent = outcome.total;
+      document.getElementById("stat-clean").textContent = outcome.clean;
+      document.getElementById("stat-rejected").textContent = outcome.rejected;
+      document.getElementById("stat-warnings").textContent = outcome.warnings;
+      document.getElementById("stat-cleaned").textContent = outcome.cleaningActions;
+
+      // Populate filter dropdowns
+      populateFilters();
+
+      // Show results
+      document.getElementById("results-section").classList.remove("hidden");
+      document.getElementById("btn-print").classList.remove("hidden");
+      document.getElementById("btn-export").classList.remove("hidden");
+      document.getElementById("print-timestamp").textContent =
+        "Generated: " + new Date().toLocaleString() + " | File: " + file.name;
+
+      applyFilters();
+    },
+    error: function(err) {
+      document.getElementById("loading-indicator").classList.add("hidden");
+      document.getElementById("drop-zone").classList.remove("hidden");
+      alert("Error parsing CSV: " + err.message);
+    }
+  });
+}
+
+function populateFilters() {
+  const ruleSet = new Set();
+  const fieldSet = new Set();
+  allIssues.forEach(function(issue) {
+    ruleSet.add(issue.rule_id);
+    issue.field.split(",").forEach(function(f) { fieldSet.add(f.trim()); });
+  });
+
+  const ruleSelect = document.getElementById("filter-rule");
+  ruleSelect.innerHTML = '<option value="">All Rules</option>';
+  Array.from(ruleSet).sort().forEach(function(r) {
+    const opt = document.createElement("option");
+    opt.value = r;
+    opt.textContent = r;
+    ruleSelect.appendChild(opt);
+  });
+
+  const fieldSelect = document.getElementById("filter-field");
+  fieldSelect.innerHTML = '<option value="">All Fields</option>';
+  Array.from(fieldSet).sort().forEach(function(f) {
+    const opt = document.createElement("option");
+    opt.value = f;
+    opt.textContent = f;
+    fieldSelect.appendChild(opt);
+  });
+}
+
+function applyFilters() {
+  const severity = document.getElementById("filter-severity").value;
+  const rule = document.getElementById("filter-rule").value;
+  const field = document.getElementById("filter-field").value;
+  const search = document.getElementById("filter-search").value.toLowerCase();
+
+  filteredIssues = allIssues.filter(function(issue) {
+    if (severity && issue.severity !== severity) return false;
+    if (rule && issue.rule_id !== rule) return false;
+    if (field && issue.field.indexOf(field) === -1) return false;
+    if (search) {
+      const haystack = [
+        issue.message, issue.original_value, issue.corrected_value,
+        issue.customer_id, issue.field, issue.rule_id,
+        String(issue.row_number)
+      ].join(" ").toLowerCase();
+      if (haystack.indexOf(search) === -1) return false;
+    }
+    return true;
+  });
+
+  sortIssues();
+  currentPage = 0;
+  renderTable();
+  updateFilterCount();
+}
+
+function clearFilters() {
+  document.getElementById("filter-severity").value = "";
+  document.getElementById("filter-rule").value = "";
+  document.getElementById("filter-field").value = "";
+  document.getElementById("filter-search").value = "";
+  applyFilters();
+}
+
+function sortTable(column) {
+  if (sortColumn === column) {
+    sortDirection = sortDirection === "asc" ? "desc" : "asc";
+  } else {
+    sortColumn = column;
+    sortDirection = "asc";
+  }
+
+  // Update header indicators
+  document.querySelectorAll("#results-table thead th").forEach(function(th) {
+    th.classList.remove("sort-asc", "sort-desc");
+  });
+  const headers = document.querySelectorAll("#results-table thead th");
+  const colMap = { row_number: 0, severity: 1, rule_id: 2, field: 3, message: 4 };
+  if (colMap[column] !== undefined) {
+    headers[colMap[column]].classList.add(sortDirection === "asc" ? "sort-asc" : "sort-desc");
+  }
+
+  sortIssues();
+  renderTable();
+}
+
+function sortIssues() {
+  const col = sortColumn;
+  const dir = sortDirection === "asc" ? 1 : -1;
+  const severityOrder = { ERROR: 0, WARNING: 1, CLEANED: 2 };
+
+  filteredIssues.sort(function(a, b) {
+    let va = a[col];
+    let vb = b[col];
+    if (col === "severity") {
+      va = severityOrder[va] !== undefined ? severityOrder[va] : 3;
+      vb = severityOrder[vb] !== undefined ? severityOrder[vb] : 3;
+    }
+    if (col === "row_number") {
+      va = Number(va);
+      vb = Number(vb);
+    }
+    if (va < vb) return -1 * dir;
+    if (va > vb) return 1 * dir;
+    return 0;
+  });
+}
+
+function renderTable() {
+  const tbody = document.getElementById("results-body");
+  tbody.innerHTML = "";
+
+  const start = currentPage * pageSize;
+  const end = Math.min(start + pageSize, filteredIssues.length);
+  const pageIssues = filteredIssues.slice(start, end);
+
+  pageIssues.forEach(function(issue, idx) {
+    const tr = document.createElement("tr");
+    tr.className = "hover:bg-slate-50 cursor-pointer transition-colors";
+    tr.onclick = function() { toggleDetail(start + idx); };
+
+    const badgeClass = issue.severity === "ERROR" ? "badge-error" :
+                       issue.severity === "WARNING" ? "badge-warning" : "badge-cleaned";
+
+    tr.innerHTML =
+      '<td class="px-3 py-2 text-slate-600 font-mono text-xs">' + issue.row_number + '</td>' +
+      '<td class="px-3 py-2"><span class="inline-block px-2 py-0.5 rounded text-xs font-medium ' + badgeClass + '">' + issue.severity + '</span></td>' +
+      '<td class="px-3 py-2 text-xs font-mono text-slate-500">' + issue.rule_id + '</td>' +
+      '<td class="px-3 py-2 text-xs text-slate-600">' + escapeHtml(issue.field) + '</td>' +
+      '<td class="px-3 py-2 text-xs text-slate-700">' + escapeHtml(issue.message) + '</td>' +
+      '<td class="px-3 py-2 text-xs text-slate-500 max-w-[150px] truncate">' + escapeHtml(String(issue.original_value || "")) + '</td>' +
+      '<td class="px-3 py-2 text-xs text-teal-700 max-w-[150px] truncate">' + escapeHtml(String(issue.corrected_value || "")) + '</td>';
+
+    tbody.appendChild(tr);
+
+    // Detail row
+    const detailTr = document.createElement("tr");
+    detailTr.className = "detail-row bg-slate-50";
+    detailTr.id = "detail-" + (start + idx);
+    const detailTd = document.createElement("td");
+    detailTd.colSpan = 7;
+    detailTd.className = "px-4 py-3";
+
+    let detailHtml = '<div class="text-xs"><p class="font-semibold text-slate-700 mb-2">Original Record (Row ' + issue.row_number + ')</p>';
+    detailHtml += '<div class="grid grid-cols-2 md:grid-cols-4 gap-2">';
+    if (issue._originalRow) {
+      Object.keys(issue._originalRow).forEach(function(key) {
+        const val = issue._originalRow[key];
+        detailHtml += '<div><span class="font-medium text-slate-500">' + escapeHtml(key) + ':</span> <span class="text-slate-700">' + escapeHtml(String(val || "(empty)")) + '</span></div>';
+      });
+    }
+    detailHtml += '</div></div>';
+    detailTd.innerHTML = detailHtml;
+    detailTr.appendChild(detailTd);
+    tbody.appendChild(detailTr);
+  });
+
+  // Update pagination
+  const totalPages = Math.ceil(filteredIssues.length / pageSize);
+  document.getElementById("page-info").textContent =
+    filteredIssues.length === 0 ? "No issues found" :
+    "Showing " + (start + 1) + " to " + end + " of " + filteredIssues.length + " issues (page " + (currentPage + 1) + " of " + totalPages + ")";
+
+  document.getElementById("btn-prev").disabled = currentPage === 0;
+  document.getElementById("btn-next").disabled = currentPage >= totalPages - 1;
+}
+
+function toggleDetail(idx) {
+  const el = document.getElementById("detail-" + idx);
+  if (el) {
+    el.classList.toggle("open");
+  }
+}
+
+function changePage(delta) {
+  const totalPages = Math.ceil(filteredIssues.length / pageSize);
+  const newPage = currentPage + delta;
+  if (newPage >= 0 && newPage < totalPages) {
+    currentPage = newPage;
+    renderTable();
+  }
+}
+
+function updateFilterCount() {
+  const el = document.getElementById("filter-count");
+  if (filteredIssues.length === allIssues.length) {
+    el.textContent = "Showing all " + allIssues.length + " issues";
+  } else {
+    el.textContent = "Showing " + filteredIssues.length + " of " + allIssues.length + " issues (filtered)";
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+
+// =========================================================================
+// EXPORT
+// =========================================================================
+
+function exportCSV() {
+  if (filteredIssues.length === 0) {
+    alert("No issues to export.");
+    return;
+  }
+
+  const headers = ["row_number", "customer_id", "severity", "rule_id", "field", "message", "original_value", "corrected_value"];
+  const rows = [headers.join(",")];
+
+  filteredIssues.forEach(function(issue) {
+    const row = headers.map(function(h) {
+      let val = issue[h];
+      if (val === null || val === undefined) val = "";
+      val = String(val).replace(/"/g, '""');
+      return '"' + val + '"';
+    });
+    rows.push(row.join(","));
+  });
+
+  const csv = rows.join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "validation_report_" + new Date().toISOString().slice(0, 10) + ".csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+
+// =========================================================================
+// DRAG AND DROP / FILE INPUT
+// =========================================================================
+
+(function() {
+  const dropZone = document.getElementById("drop-zone");
+  const fileInput = document.getElementById("file-input");
+
+  dropZone.addEventListener("dragover", function(e) {
+    e.preventDefault();
+    dropZone.classList.add("drag-over");
+  });
+
+  dropZone.addEventListener("dragleave", function(e) {
+    e.preventDefault();
+    dropZone.classList.remove("drag-over");
+  });
+
+  dropZone.addEventListener("drop", function(e) {
+    e.preventDefault();
+    dropZone.classList.remove("drag-over");
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      processFile(files[0]);
+    }
+  });
+
+  fileInput.addEventListener("change", function(e) {
+    if (e.target.files.length > 0) {
+      processFile(e.target.files[0]);
+    }
+  });
+})();
+</script>
+
+</body>
+</html>

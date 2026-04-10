@@ -1,0 +1,14 @@
+# Generated output files
+output/*.db
+output/*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env
+
+# Claude Code config
+.claude/
