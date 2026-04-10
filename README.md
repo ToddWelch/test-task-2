@@ -177,11 +177,11 @@ All 36 rules organized by severity level:
 
 ## HTML Validation Report
 
-The standalone HTML report (`report/index.html`) duplicates all 36 validation rules in JavaScript, enabling client-side processing of any CSV with matching column names. CSV data is processed entirely in the browser. Tailwind CSS and PapaParse are loaded from CDN, requiring internet access.
+The standalone HTML report (`report/index.html`) duplicates 35 of 36 validation rules in JavaScript, enabling client-side processing of any CSV with matching column names. CSV data is processed entirely in the browser. Tailwind CSS and PapaParse are loaded from CDN, requiring internet access.
 
 ### Upload and Processing
 
-Drag and drop a CSV onto the upload zone (or use the file picker). PapaParse handles CSV parsing client-side. All 36 rules execute in JavaScript with the same logic, thresholds, and edge case handling as the Python pipeline. The report works by double-clicking the file from a file explorer. No server, no build step, no installation.
+Drag and drop a CSV onto the upload zone (or use the file picker). PapaParse handles CSV parsing client-side. 35 of 36 rules execute in JavaScript with the same logic, thresholds, and edge case handling as the Python pipeline (R36, duplicate customer ID disambiguation, is Python-only). The report works by double-clicking the file from a file explorer. No server, no build step, no installation.
 
 ### Dashboard and Filtering
 
