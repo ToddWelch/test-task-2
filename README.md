@@ -19,8 +19,8 @@ The pipeline processed 500 input records, loaded 372 clean records into SQLite, 
 
 ```bash
 # Clone the repository
-git clone https://github.com/ToddWelch/test-task-2.git
-cd test-task-2
+git clone https://github.com/ToddWelch/example-Data-Pipeline.git
+cd example-Data-Pipeline
 
 # Install dependencies (just Pydantic, everything else is standard library)
 pip install -r requirements.txt
